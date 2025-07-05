@@ -1165,6 +1165,8 @@ typedef struct xqc_config_s {
 
     /** for warning when the number of elements in one bucket exceeds the value of hash_conflict_threshold*/
     uint32_t        hash_conflict_threshold;
+            //hfs: 1 for delay PATH_CHALLENGE for faster migration, 0 for need PATH_CHELLENGE immediately
+            uint8_t        delay_challenge;
 } xqc_config_t;
 
 
