@@ -38,7 +38,7 @@
  #include "getopt.h"
  #endif
  
- #include "rebind.h"
+
  
  extern long xqc_random(void);
  extern xqc_usec_t xqc_now();
