@@ -2469,7 +2469,7 @@
  
      // 读取图片文件
      if (user_stream->send_body == NULL) {
-         FILE *fp = fopen("/home/cnic/xquic/tests/app/test_20mb", "rb");
+         FILE *fp = fopen("./test_20mb", "rb");
          if (!fp) {
              fprintf(stderr, "Failed to open image file\n");
              return -1;
