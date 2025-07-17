@@ -1570,7 +1570,8 @@
          g_test_case = -1;
          return size;
      }
- 
+
+     int retry_cnt = 0;
      do {
          set_sys_errno(0);
          res = sendto(fd, send_buf, send_buf_size, 0, peer_addr, peer_addrlen);
@@ -1580,11 +1581,16 @@
              if (get_sys_errno() == EAGAIN) {
                  res = XQC_SOCKET_EAGAIN;
              }
+             else if (errno == ENETUNREACH && retry_cnt < 5) {
+                usleep(200 * 1000); // 200ms
+                retry_cnt++;
+                continue;
+             }
  
          } else {
              snd_sum += res;
          }
-     } while ((res < 0) && (EINTR== get_sys_errno()));
+     } while ((res < 0) && (EINTR== get_sys_errno() || ENETUNREACH == get_sys_errno()) && (retry_cnt < 5));
  
      if ((xqc_now() - last_snd_ts) > 200000) {
          // mpshell
