@@ -2518,7 +2518,7 @@
      const size_t max_send_size =20 * 1024 * 1024; // 1MB
  
      // 发送请求体
-     user_stream->send_offset = read_offset();
+     //user_stream->send_offset = read_offset();
  
      if (user_stream->send_offset < user_stream->send_body_len) {
  
