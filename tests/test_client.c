@@ -262,6 +262,7 @@
  char g_host[64] = "test.xquic.com";
  char g_url_path[256] = "/path/resource";
  char g_scheme[8] = "https";
+ char g_file_path[128] = ""; //hfs: 测试长连接传输文件地址
  char g_test_type[20] = "normal-test"; //hfs:测试类型
  int g_reset = 0; //hfs:迁移后重置user_conn参数
  char g_url[2048];
@@ -2469,7 +2470,7 @@
  
      // 读取图片文件
      if (user_stream->send_body == NULL) {
-         FILE *fp = fopen("./test_20mb", "rb");
+         FILE *fp = fopen(g_file_path, "rb");
          if (!fp) {
              fprintf(stderr, "Failed to open image file\n");
              return -1;
@@ -4069,6 +4070,10 @@
      int ch = 0;
      while ((ch = getopt_long(argc, argv, "a:p:P:n:c:Ct:T:1s:w:r:l:Ed:u:H:h:Gx:6NMR:i:V:v:q:o:fe:F:D:b:B:J:Q:U:AyzS:gm:Y:j", long_opts, NULL)) != -1) {
          switch (ch) {
+         case 'F':
+             printf("option test file path: %s\n",optarg);
+             snprintf(g_file_path, sizeof(g_file_path), optarg);
+             break;
          case 'j':
              printf("option reset user_conn when migration\n");
              g_reset = 1;
@@ -4155,14 +4160,14 @@
                  }
              }
              break;
-         case 'F':
-             printf("option abs_timeout to close conn:%s\n", optarg);
-             g_conn_abs_timeout = atoi(optarg);
-             if (g_conn_abs_timeout < 0) {
-                 printf("timeout must be positive!\n");
-                 exit(0);
-             }
-             break;
+        //  case 'F':
+        //      printf("option abs_timeout to close conn:%s\n", optarg);
+        //      g_conn_abs_timeout = atoi(optarg);
+        //      if (g_conn_abs_timeout < 0) {
+        //          printf("timeout must be positive!\n");
+        //          exit(0);
+        //      }
+        //      break;
          case 'w': /* Write received body to file. */
              printf("option save body :%s\n", optarg);
              snprintf(g_write_file, sizeof(g_write_file), optarg);
