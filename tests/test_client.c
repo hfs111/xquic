@@ -1055,7 +1055,7 @@
  }
  
  //hfs: declare
- void on_enp6s19_ip_change(void *arg);
+ int on_enp6s19_ip_change(void *arg);
  void on_enp6s19_ip_reconnect(void *arg);
  
  /* 多路必须保证传正确的path id，因为conn_fd写死了，跟initial path不一定匹配 */
@@ -1256,10 +1256,12 @@
                  res = XQC_SOCKET_EAGAIN;
              } else if (errno == ENETUNREACH) {
                  // 网络不可达，等待100ms后重试
-                 if (connection_migration_enabled && retry_cnt < 5) {
-                     on_enp6s19_ip_change(user_conn);
+                 if (connection_migration_enabled && retry_cnt < 20) {
+                     while(on_enp6s19_ip_change(user_conn)!=0 && retry_cnt < 20)
+                        usleep(1000 * 1000); // 100ms
+                        retry_cnt++;
                      user_conn->is_reconnecting = 1; //hfs: reconnect
-                     usleep(500 * 1000); // 100ms
+                     usleep(1000 * 1000); // 100ms
                      retry_cnt++;
                      continue;
                  } else {
@@ -1301,7 +1303,7 @@
              }
          }
  
-     } while ((res < 0) && (errno == EINTR || errno == ENETUNREACH) && (retry_cnt < 5));
+     } while ((res < 0) && (errno == EINTR || errno == ENETUNREACH) && (retry_cnt < 20));
  
      return res;
  }
@@ -3894,7 +3896,7 @@
  }
  
  //hfs: 处理enp6s19 IP变化事件
- void on_enp6s19_ip_change(void* arg) {
+ int on_enp6s19_ip_change(void* arg) {
      user_conn_t *user_conn = (user_conn_t *)arg;
      printf("[INFO] enp6s19 IP changed, will update socket! old fd: %d\n", user_conn->fd);
  
@@ -3914,7 +3916,7 @@
      }
  
      // 2. 创建新socket并注册事件
-     xqc_client_create_conn_socket(user_conn);
+     return xqc_client_create_conn_socket(user_conn);
      //register_netlink_event(eb, on_enp6s19_ip_change, user_conn);
  }
  

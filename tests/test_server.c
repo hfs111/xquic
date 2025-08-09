@@ -104,18 +104,21 @@
  } user_stream_t;
  
  typedef struct user_conn_s {
-     struct event        *ev_timeout;
-     struct sockaddr_in6  peer_addr;
-     socklen_t            peer_addrlen;
-     xqc_cid_t            cid;
- 
-     user_dgram_blk_t   *dgram_blk;
-     size_t              dgram_mss;
-     uint8_t             dgram_not_supported;
- 
-     xqc_connection_t   *quic_conn;
-     xqc_h3_conn_t      *h3_conn;
- } user_conn_t;
+    struct event        *ev_timeout;
+    struct sockaddr_in6  peer_addr;
+    socklen_t            peer_addrlen;
+    xqc_cid_t            cid;
+
+    user_dgram_blk_t   *dgram_blk;
+    size_t              dgram_mss;
+    uint8_t             dgram_not_supported;
+
+    xqc_connection_t   *quic_conn;
+    xqc_h3_conn_t      *h3_conn;
+    
+    /* 服务器端简化的关键数据包重传支持 */
+    int                  critical_retrans_enabled;
+} user_conn_t;
  
  typedef struct xqc_server_ctx_s {
      int fd;
