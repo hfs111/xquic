@@ -265,6 +265,8 @@
  char g_file_path[128] = ""; //hfs: 测试长连接传输文件地址
  char g_test_type[20] = "normal-test"; //hfs:测试类型
  int g_reset = 0; //hfs:迁移后重置user_conn参数
+ int g_immediate_resend = 0; //hfs:迁移后立即重传未确认包
+ int g_max_retry = 20; //最大ipchange重试次数
  char g_url[2048];
  char g_headers[MAX_HEADER][256];
  int g_header_cnt = 0;
@@ -1055,8 +1057,8 @@
  }
  
  //hfs: declare
- int on_enp6s19_ip_change(void *arg);
- void on_enp6s19_ip_reconnect(void *arg);
+ int on_ip_change(void *arg);
+ //void on_enp6s19_ip_reconnect(void *arg);
  
  /* 多路必须保证传正确的path id，因为conn_fd写死了，跟initial path不一定匹配 */
  ssize_t
@@ -1256,14 +1258,24 @@
                  res = XQC_SOCKET_EAGAIN;
              } else if (errno == ENETUNREACH) {
                  // 网络不可达，等待100ms后重试
-                 if (connection_migration_enabled && retry_cnt < 20) {
-                     while(on_enp6s19_ip_change(user_conn)!=0 && retry_cnt < 20)
-                        usleep(1000 * 1000); // 100ms
+                 if (connection_migration_enabled && retry_cnt < g_max_retry) {
+                    int base_delay_ms = 100;      // 初始等待 100ms
+                    int max_delay_ms  = 5000;     // 最大等待 5 秒
+                
+                    while (on_ip_change(user_conn) != 0 && retry_cnt < g_max_retry) {
+                        // 计算延迟时间：100ms, 200ms, 400ms, 800ms, ...
+                        int delay_ms = base_delay_ms * (1 << retry_cnt);
+                        if (delay_ms > max_delay_ms) {
+                            delay_ms = max_delay_ms;
+                        }
+                
+                        usleep(delay_ms * 1000); // 转换成微秒
                         retry_cnt++;
-                     user_conn->is_reconnecting = 1; //hfs: reconnect
-                     usleep(1000 * 1000); // 100ms
-                     retry_cnt++;
-                     continue;
+                    }
+                
+                    user_conn->is_reconnecting = 1; // hfs: reconnect
+                    retry_cnt++;
+                    continue;
                  } else {
                      printf("xqc_client_write_socket_ex: retry limit reached, still Network is unreachable\n");
                      res = XQC_SOCKET_ERROR;
@@ -3894,9 +3906,21 @@
      }
      conn->conn_settings = *g_conn_settings;
  }
- 
+
+ void xqc_conn_client_resend_immediately(xqc_connection_t *conn){
+    xqc_list_head_t *head = &conn->conn_send_queue->sndq_unacked_packets[2]; //hfs: 只重传应用数据，也就是XQC_PNS_APP_DATA
+    int congest = 1;
+
+    xqc_path_ctx_t  *path;
+    xqc_list_head_t *pos, *next;
+
+    xqc_list_for_each_safe(pos, next, &conn->conn_paths_list) {
+        path = xqc_list_entry(pos, xqc_path_ctx_t, path_list);
+        xqc_path_send_packets(conn, path, head, congest, XQC_SEND_TYPE_RETRANS);
+    }
+ }
  //hfs: 处理enp6s19 IP变化事件
- int on_enp6s19_ip_change(void* arg) {
+ int on_ip_change(void* arg) {
      user_conn_t *user_conn = (user_conn_t *)arg;
      printf("[INFO] enp6s19 IP changed, will update socket! old fd: %d\n", user_conn->fd);
  
@@ -3916,89 +3940,97 @@
      }
  
      // 2. 创建新socket并注册事件
-     return xqc_client_create_conn_socket(user_conn);
-     //register_netlink_event(eb, on_enp6s19_ip_change, user_conn);
+     int ret = xqc_client_create_conn_socket(user_conn);
+     if(ret == 0 && g_immediate_resend){
+         printf("ip changed,xqc_conn_resend_immediately\n");
+         xqc_connection_t *conn;
+         conn = xqc_engine_conns_hash_find(user_conn->ctx->engine, &(user_conn->cid), 's');
+         
+         //xqc_conn_client_resend_immediately(conn);
+     }
+     return ret;
+     //register_netlink_event(eb, on_ip_change, user_conn);
  }
  
  //hfs: 处理enp6s19 IP变化后重新连接
- void on_enp6s19_ip_reconnect(void *arg) {
-     user_conn_t *user_conn = (user_conn_t *)arg;
-     //user_conn->is_reconnecting = 1; // 设置重连标志
-     printf("[INFO] enp6s19 IP changed, will reconnect! old fd: %d\n", user_conn->fd);
+//  void on_enp6s19_ip_reconnect(void *arg) {
+//      user_conn_t *user_conn = (user_conn_t *)arg;
+//      //user_conn->is_reconnecting = 1; // 设置重连标志
+//      printf("[INFO] enp6s19 IP changed, will reconnect! old fd: %d\n", user_conn->fd);
  
-     // 1. 释放内部资源，但不free user_conn本身
-     if (user_conn->ev_socket) {
-         event_del(user_conn->ev_socket);
-         event_free(user_conn->ev_socket);
-         user_conn->ev_socket = NULL;
-     }
-     if (user_conn->fd > 0) {
-         close(user_conn->fd);
-         user_conn->fd = -1;
-     }
-     if (user_conn->quic_conn) {
-         xqc_conn_close(user_conn->ctx->engine, &user_conn->cid);
-         user_conn->quic_conn = NULL;
-     }
+//      // 1. 释放内部资源，但不free user_conn本身
+//      if (user_conn->ev_socket) {
+//          event_del(user_conn->ev_socket);
+//          event_free(user_conn->ev_socket);
+//          user_conn->ev_socket = NULL;
+//      }
+//      if (user_conn->fd > 0) {
+//          close(user_conn->fd);
+//          user_conn->fd = -1;
+//      }
+//      if (user_conn->quic_conn) {
+//          xqc_conn_close(user_conn->ctx->engine, &user_conn->cid);
+//          user_conn->quic_conn = NULL;
+//      }
  
-     if (user_conn->dgram_blk) {
-         if (user_conn->dgram_blk->data) free(user_conn->dgram_blk->data);
-         if (user_conn->dgram_blk->recv_data) free(user_conn->dgram_blk->recv_data);
-         free(user_conn->dgram_blk);
-         user_conn->dgram_blk = NULL;
-     }
-     if (user_conn->peer_addr) { free(user_conn->peer_addr); user_conn->peer_addr = NULL; }
-     if (user_conn->local_addr) { free(user_conn->local_addr); user_conn->local_addr = NULL; }
+//      if (user_conn->dgram_blk) {
+//          if (user_conn->dgram_blk->data) free(user_conn->dgram_blk->data);
+//          if (user_conn->dgram_blk->recv_data) free(user_conn->dgram_blk->recv_data);
+//          free(user_conn->dgram_blk);
+//          user_conn->dgram_blk = NULL;
+//      }
+//      if (user_conn->peer_addr) { free(user_conn->peer_addr); user_conn->peer_addr = NULL; }
+//      if (user_conn->local_addr) { free(user_conn->local_addr); user_conn->local_addr = NULL; }
  
-     // 2. 重新初始化 user_conn 内容
-     xqc_client_init_addr(user_conn, g_server_addr, g_server_port);
-     xqc_client_create_conn_socket(user_conn);
+//      // 2. 重新初始化 user_conn 内容
+//      xqc_client_init_addr(user_conn, g_server_addr, g_server_port);
+//      xqc_client_create_conn_socket(user_conn);
  
-     // 3. 重新建立 QUIC 连接（不要重新分配user_conn指针！）
-     // 参考 main 里的连接建立流程，重新调用 xqc_h3_connect/xqc_connect 等，更新 user_conn->cid、quic_conn、h3_conn 等
-     // 例如：
-     xqc_conn_ssl_config_t conn_ssl_config;
-     memset(&conn_ssl_config, 0, sizeof(conn_ssl_config));
-     // ...填充 conn_ssl_config ...
-     const xqc_cid_t *cid = NULL;
-     if (user_conn->h3 == 0) {
-         cid = xqc_h3_connect(user_conn->ctx->engine, g_conn_settings, user_conn->token, user_conn->token_len,
-                              g_host, g_no_crypt, &conn_ssl_config, user_conn->peer_addr, 
-                              user_conn->peer_addrlen, user_conn);
-     } else if (user_conn->h3 == 2) {
-         cid = xqc_connect(user_conn->ctx->engine, g_conn_settings, user_conn->token, user_conn->token_len,
-                              g_host, g_no_crypt, &conn_ssl_config, user_conn->peer_addr, 
-                              user_conn->peer_addrlen, XQC_DEFINED_ALPN_H3_EXT, user_conn);
-     } else {
-         cid = xqc_connect(user_conn->ctx->engine, g_conn_settings, user_conn->token, user_conn->token_len,
-                           g_server_addr, g_no_crypt, &conn_ssl_config, user_conn->peer_addr, 
-                           user_conn->peer_addrlen, XQC_ALPN_TRANSPORT, user_conn);
-     }
-     if (cid == NULL) {
-         printf("xqc_connect error\n");
-         return;
-     }
-     memcpy(&user_conn->cid, cid, sizeof(*cid));
+//      // 3. 重新建立 QUIC 连接（不要重新分配user_conn指针！）
+//      // 参考 main 里的连接建立流程，重新调用 xqc_h3_connect/xqc_connect 等，更新 user_conn->cid、quic_conn、h3_conn 等
+//      // 例如：
+//      xqc_conn_ssl_config_t conn_ssl_config;
+//      memset(&conn_ssl_config, 0, sizeof(conn_ssl_config));
+//      // ...填充 conn_ssl_config ...
+//      const xqc_cid_t *cid = NULL;
+//      if (user_conn->h3 == 0) {
+//          cid = xqc_h3_connect(user_conn->ctx->engine, g_conn_settings, user_conn->token, user_conn->token_len,
+//                               g_host, g_no_crypt, &conn_ssl_config, user_conn->peer_addr, 
+//                               user_conn->peer_addrlen, user_conn);
+//      } else if (user_conn->h3 == 2) {
+//          cid = xqc_connect(user_conn->ctx->engine, g_conn_settings, user_conn->token, user_conn->token_len,
+//                               g_host, g_no_crypt, &conn_ssl_config, user_conn->peer_addr, 
+//                               user_conn->peer_addrlen, XQC_DEFINED_ALPN_H3_EXT, user_conn);
+//      } else {
+//          cid = xqc_connect(user_conn->ctx->engine, g_conn_settings, user_conn->token, user_conn->token_len,
+//                            g_server_addr, g_no_crypt, &conn_ssl_config, user_conn->peer_addr, 
+//                            user_conn->peer_addrlen, XQC_ALPN_TRANSPORT, user_conn);
+//      }
+//      if (cid == NULL) {
+//          printf("xqc_connect error\n");
+//          return;
+//      }
+//      memcpy(&user_conn->cid, cid, sizeof(*cid));
  
-         // 4. 重新分配 dgram_blk（如有需要）
-     if (g_send_dgram) {
-         user_conn->dgram_blk = calloc(1, sizeof(user_dgram_blk_t));
-         user_conn->dgram_blk->data_sent = 0;
-         user_conn->dgram_blk->data_recv = 0;
-         user_conn->dgram_blk->dgram_id = 1;
-         user_conn->dgram_blk->data = calloc(1, g_send_body_size);
-         user_conn->dgram_blk->data_len = g_send_body_size;
-         if (g_echo_check) {
-             user_conn->dgram_blk->recv_data = calloc(1, g_send_body_size << 4);
-         }
-     }
+//          // 4. 重新分配 dgram_blk（如有需要）
+//      if (g_send_dgram) {
+//          user_conn->dgram_blk = calloc(1, sizeof(user_dgram_blk_t));
+//          user_conn->dgram_blk->data_sent = 0;
+//          user_conn->dgram_blk->data_recv = 0;
+//          user_conn->dgram_blk->dgram_id = 1;
+//          user_conn->dgram_blk->data = calloc(1, g_send_body_size);
+//          user_conn->dgram_blk->data_len = g_send_body_size;
+//          if (g_echo_check) {
+//              user_conn->dgram_blk->recv_data = calloc(1, g_send_body_size << 4);
+//          }
+//      }
  
-     // 5. 重新注册 netlink 事件
-     //register_netlink_event(eb, on_enp6s19_ip_reconnect, user_conn);
-     xqc_engine_main_logic(user_conn->ctx->engine);
+//      // 5. 重新注册 netlink 事件
+//      //register_netlink_event(eb, on_enp6s19_ip_reconnect, user_conn, g_multi_interface[0]);
+//      xqc_engine_main_logic(user_conn->ctx->engine);
  
-     printf("[INFO] reconnect done, new fd: %d\n", user_conn->fd);
- }
+//      printf("[INFO] reconnect done, new fd: %d\n", user_conn->fd);
+//  }
  
  int main(int argc, char *argv[]) {
  
@@ -4070,8 +4102,12 @@
      };
  
      int ch = 0;
-     while ((ch = getopt_long(argc, argv, "a:p:P:n:c:Ct:T:1s:w:r:l:Ed:u:H:h:Gx:6NMR:i:V:v:q:o:fe:F:D:b:B:J:Q:U:AyzS:gm:Y:j", long_opts, NULL)) != -1) {
+     while ((ch = getopt_long(argc, argv, "a:p:P:n:c:Ct:T:1s:w:r:l:Ed:u:H:h:Gx:6NMR:i:V:v:q:o:fe:F:D:b:B:J:Q:U:AyzS:gm:Y:j2", long_opts, NULL)) != -1) {
          switch (ch) {
+         case '2':
+             printf("option immediate resend: %s\n", "on");
+             g_immediate_resend = 1;
+             break;
          case 'F':
              printf("option test file path: %s\n",optarg);
              snprintf(g_file_path, sizeof(g_file_path), optarg);
@@ -4852,7 +4888,7 @@
  
      //hfs:临时增加
      if(connection_migration_enabled)
-         register_netlink_event(eb, on_enp6s19_ip_change, user_conn); //hfs :register ip_rebind
+         register_netlink_event(eb, on_ip_change, user_conn, g_multi_interface[0]); //hfs :register ip_rebind
  
      if (g_enable_multipath) {
  

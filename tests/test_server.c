@@ -104,21 +104,18 @@
  } user_stream_t;
  
  typedef struct user_conn_s {
-    struct event        *ev_timeout;
-    struct sockaddr_in6  peer_addr;
-    socklen_t            peer_addrlen;
-    xqc_cid_t            cid;
-
-    user_dgram_blk_t   *dgram_blk;
-    size_t              dgram_mss;
-    uint8_t             dgram_not_supported;
-
-    xqc_connection_t   *quic_conn;
-    xqc_h3_conn_t      *h3_conn;
-    
-    /* 服务器端简化的关键数据包重传支持 */
-    int                  critical_retrans_enabled;
-} user_conn_t;
+     struct event        *ev_timeout;
+     struct sockaddr_in6  peer_addr;
+     socklen_t            peer_addrlen;
+     xqc_cid_t            cid;
+ 
+     user_dgram_blk_t   *dgram_blk;
+     size_t              dgram_mss;
+     uint8_t             dgram_not_supported;
+ 
+     xqc_connection_t   *quic_conn;
+     xqc_h3_conn_t      *h3_conn;
+ } user_conn_t;
  
  typedef struct xqc_server_ctx_s {
      int fd;
@@ -165,6 +162,7 @@
  int g_enable_fec = 0;
  int g_debug = 0; //hfs: for debug print
  int g_delay_challenge = 0; //hfs: 置为1，则延迟认证PATH_CHALLENGE，相当于0-RTT连接迁移
+ int g_immediate_resend = 0; //hfs: 迁移后立即重传未确认包
  double g_copa_ai = 1.0;
  double g_copa_delta = 0.05;
  int g_enable_h3_ext = 1;
@@ -2211,8 +2209,12 @@
      };
  
      int ch = 0;
-     while ((ch = getopt_long(argc, argv, "a:p:dDefc:Cs:w:r:l:u:x:6bS:MR:o:EK:mLQ:U:yH", long_opts, NULL)) != -1) {
+     while ((ch = getopt_long(argc, argv, "a:p:dDefc:Cs:w:r:l:u:x:6bS:MR:o:EK:mLQ:U:yH2", long_opts, NULL)) != -1) {
          switch (ch) {
+         case '2':
+             printf("option immediate resend: %s\n", "on");
+             g_immediate_resend = 1;
+             break;
          //hfs: for debug print
          case 'd':
              printf("option hfs: debug\n");
@@ -2408,7 +2410,7 @@
                  c_qlog_importance = optarg[0];
                  printf("option qlog importance :%s\n", optarg);
                  break;
- 
+            
              default:
                  break;
              }
@@ -2712,7 +2714,14 @@
          config.delay_challenge = 1;
      else
          config.delay_challenge = 0;
- 
+
+     if(g_immediate_resend){
+        config.immediate_resend = 1;
+     }
+     else{
+        config.immediate_resend = 0;
+     }
+
      ctx.engine = xqc_engine_create(XQC_ENGINE_SERVER, &config, &engine_ssl_config,
                                     &callback, &tcbs, &ctx);
      if (ctx.engine == NULL) {

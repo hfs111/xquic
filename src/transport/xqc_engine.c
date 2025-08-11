@@ -144,6 +144,7 @@
  
      //hfs: set delay_challenge flag
      dst->delay_challenge = src->delay_challenge;
+     dst->immediate_resend = src->immediate_resend;
      
      return XQC_OK;
  }
@@ -1094,6 +1095,21 @@
      return ret;
  }
  
+
+ void xqc_conn_server_resend_immediately(xqc_connection_t *conn){
+    printf("DEBUG: server resend immediately\n");
+    xqc_list_head_t *head = &conn->conn_send_queue->sndq_unacked_packets[2]; //hfs: 只重传应用数据，也就是XQC_PNS_APP_DATA
+    int congest = 1;
+
+    xqc_path_ctx_t  *path;
+    xqc_list_head_t *pos, *next;
+
+    xqc_list_for_each_safe(pos, next, &conn->conn_paths_list) {
+        path = xqc_list_entry(pos, xqc_path_ctx_t, path_list);
+        xqc_path_send_packets(conn, path, head, congest, XQC_SEND_TYPE_RETRANS);
+    }
+ }
+
  /**
   * Pass received UDP packet payload into xquic engine.
   * @param recv_time   UDP packet received time in microsecond
@@ -1224,7 +1240,7 @@
                  //printf("HFS: Send PATH_CHALLENGE\n");
                  xqc_conn_send_path_challenge(conn, path);
                  path->rebinding_count++;
-                 path->rebinding_check_response = 1;
+                 path->rebinding_check_response = 0;
                  xqc_usec_t pto = xqc_conn_get_max_pto(conn);
                  xqc_timer_set(&path->path_send_ctl->path_timer_manager,
                  XQC_TIMER_NAT_REBINDING, recv_time, 3 * pto);
@@ -1232,6 +1248,17 @@
                  xqc_memcpy(path->peer_addr, path->rebinding_addr, path->rebinding_addrlen);
                  path->peer_addrlen = path->rebinding_addrlen;
                  path->addr_str_len = 0;
+                 if ((path->rebinding_check_response == 0)
+                            && xqc_is_same_addr(peer_addr, (struct sockaddr *)path->rebinding_addr))
+                 {
+                     /* PATH_RESPONSE recv from rebinding_addr */
+                     path->rebinding_check_response = 1;
+                     xqc_log(conn->log, XQC_LOG_INFO, "|REBINDING|path:%ui|recv_addr = rebinding_addr|check PATH_RESPONSE|", path->path_id);
+                 }
+                 if(engine->config->immediate_resend){
+                    xqc_conn_server_resend_immediately(conn); //立即重发未确认的数据包
+                 }
+                 
          }
          else {
              if ((path != NULL) && (path->path_state == XQC_PATH_STATE_ACTIVE)) {

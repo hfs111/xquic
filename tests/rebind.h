@@ -41,10 +41,11 @@ static struct event *ev_nl = NULL;
 static int nl_sock = -1;
 
 // 回调函数指针
-static void (*g_on_ip_change_cb)(void *) = NULL;
+static int (*g_on_ip_change_cb)(void *) = NULL;
 static void *g_on_ip_change_arg = NULL;
 
 static void netlink_event_cb(evutil_socket_t fd, short events, void *arg) {
+    const char *target_ifname = (const char *)arg; 
     char buf[4096];
     int len = recv(fd, buf, sizeof(buf), 0);
     if (len > 0) {
@@ -54,7 +55,7 @@ static void netlink_event_cb(evutil_socket_t fd, short events, void *arg) {
                 struct ifaddrmsg *ifa = NLMSG_DATA(nh);
                 char ifname[IFNAMSIZ];
                 if_indextoname(ifa->ifa_index, ifname);
-                if (strcmp(ifname, "enp6s19") == 0 && g_on_ip_change_cb) {
+                if (strcmp(ifname, target_ifname) == 0 && g_on_ip_change_cb) {
                     g_on_ip_change_cb(g_on_ip_change_arg);
                 }
             }
@@ -64,7 +65,7 @@ static void netlink_event_cb(evutil_socket_t fd, short events, void *arg) {
 }
 
 // 注册netlink事件，base为event_base，cb为IP变化时的回调，arg为回调参数
-void register_netlink_event(struct event_base *base, void (*on_ip_change_cb)(void *), void *cb_arg) {
+void register_netlink_event(struct event_base *base, int (*on_ip_change_cb)(void *), void *cb_arg, const char *ifname) {
     struct sockaddr_nl sa = {0};
     nl_sock = socket(AF_NETLINK, SOCK_RAW, NETLINK_ROUTE);
     sa.nl_family = AF_NETLINK;
@@ -72,6 +73,6 @@ void register_netlink_event(struct event_base *base, void (*on_ip_change_cb)(voi
     bind(nl_sock, (struct sockaddr*)&sa, sizeof(sa));
     g_on_ip_change_cb = on_ip_change_cb;
     g_on_ip_change_arg = cb_arg;
-    ev_nl = event_new(base, nl_sock, EV_READ|EV_PERSIST, netlink_event_cb, NULL);
+    ev_nl = event_new(base, nl_sock, EV_READ|EV_PERSIST, netlink_event_cb, (void *)ifname);
     event_add(ev_nl, NULL);
 }

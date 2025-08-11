@@ -1167,6 +1167,7 @@ typedef struct xqc_config_s {
     uint32_t        hash_conflict_threshold;
             //hfs: 1 for delay PATH_CHALLENGE for faster migration, 0 for need PATH_CHELLENGE immediately
             uint8_t        delay_challenge;
+            uint8_t        immediate_resend;
 } xqc_config_t;
 
 

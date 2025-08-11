@@ -1,12 +1,12 @@
 #!/bin/bash
 
 IFACE="enp6s19"  # 你的网卡名（用 `ip addr` 查看）
-IP1="192.168.1.126"
-IP2="192.168.1.127"
-NETMASK="/24"    # 根据你的网段调整
+IP1="fe80::be24:11ff:fe6f:3437"
+IP2="fe80::be24:11ff:fe6f:3438"
+NETMASK="/64"    # 根据你的网段调整
 GATEWAY="192.168.1.1"  # 可选：用于默认网关切换（如需要）
 
-INTERVAL=10  # 切换间隔秒数
+INTERVAL=4  # 切换间隔秒数
 
 # 退出时自动恢复
 cleanup() {

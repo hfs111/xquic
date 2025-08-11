@@ -128,6 +128,7 @@ xqc_timer_nat_rebinding_timeout(xqc_timer_type_t type, xqc_usec_t now, void *use
 
     path->rebinding_addrlen = 0;
     path->rebinding_check_response = 0;
+    xqc_set_path_state(path, XQC_PATH_STATE_CLOSED);//hfs:如果超时，将路径置为关闭状态
 }
 
 void
